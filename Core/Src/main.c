@@ -20,9 +20,9 @@
 #include "main.h"
 #include "i2c.h"
 #include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "math.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -67,6 +67,9 @@ int _write(int fd, char* ptr, int len) {
    return len;
 }
 
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+//    printf("1 milli!\r\n");
+}
 
 //copied from daq-testbed-basic
 uint8_t opcodes_to_spi(uint16_t* opcodes, uint8_t num_opcodes, uint8_t* spi_bytes) {
@@ -112,7 +115,7 @@ void write_single_reg(uint8_t address, uint16_t value) {
 }
 
 float adc_to_volt(int32_t adc_count, int32_t gain){
-	float volt = ((adc_count-1) / 8388608.0) * 1.2 * 2.110937162 / (float)(gain);
+	float volt = ((adc_count-1) / 8388608.0) * 1.2 / (float)(gain);
 	return volt;
 }
 
@@ -122,8 +125,20 @@ float adc_to_psi(int32_t adc_count){
 	return psi;
 }
 
+
+void actuate(int32_t channel, int32_t on){ //labeled channels 1-16
+	if(channel < 8){
+		pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, channel-1, on);
+	}else{
+		pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, channel-9, on);
+	}
+}
+
+
 float serial_data[] = {0,0,0,0}; //send to raspberry pi
-//
+
+uint8_t actuation_channels[11] = {0};
+
 
 
 
@@ -161,22 +176,23 @@ int main(void)
   MX_I2C1_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
   // disable printf buffering
   setvbuf(stdout, NULL, _IONBF, 0);
   
+  HAL_TIM_Base_Start_IT(&htim1);
+
   pca9534_init_output(&hi2c1, PCA9534_OUTPUT_1);
   pca9534_init_output(&hi2c1, PCA9534_OUTPUT_2);
 
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, 1);
 
-  // for (uint32_t i = 0; i < 8; i++) {
-  //   pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, i, 0);
-  // }
-  // for (uint32_t i = 0; i < 8; i++) {
-  //   pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, i, 0);
-  // }
+
+   for (uint32_t i = 1; i <= 16; i++){
+	   actuate(i, 0);
+   }
 
 
   //DAQ TESBED init
@@ -219,6 +235,10 @@ int main(void)
 //    pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, 7, 1);
 //    pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, 7, 1);
 
+	  for (uint8_t i=0; i<10){
+
+	  }
+
 
 
 
@@ -250,26 +270,26 @@ int main(void)
 
 		  if (i == 0) {
 			float psi = adc_to_psi(channels[i]);
-			if(psi > -10){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
+//			if(psi > -10){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
 //				printf("PSI 0: %f \r\n", psi);
 				serial_data[1] = psi;
-			}
+//			}
 		  }
 		  if (i == 1) {
 			float psi = adc_to_psi(channels[i]);
-			if(psi > -10){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
+//			if(psi > -10){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
 //				printf("PSI 1: %f \r\n", psi);
 				serial_data[2] = psi;
-			}
+//			}
 		  }
 
           if (i == 2) {
-        	float mV = adc_to_volt(channels[2],1) * 1000.0 - 0.5;
+        	float mV = adc_to_volt(channels[2],16) * 1000.0 - 0.5;
 
-        	if(fabs(mV) < 1000){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
+//        	if(fabs(mV) < 1000){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
 //				printf("TC 1: %f \r\n", mV);
 				serial_data[3] = mV;
-			}
+//			}
           }
 		}
 
@@ -334,13 +354,12 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 180;
+  RCC_OscInitStruct.PLL.PLLN = 360;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
