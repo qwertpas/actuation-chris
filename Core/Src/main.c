@@ -62,14 +62,20 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+uint8_t UART2_rxBuffer[4l] = {0};
+uint8_t keypress = 0;
+
+uint32_t millis = 0;
+float data_out[3] = {0}; //send to raspberry pi: (psi1, psi2, temp1)
+uint8_t act_channels[11] = {0}; //first element is unused so 1-10 correspond to labeled channels
+
+
+
 int _write(int fd, char* ptr, int len) {
   HAL_UART_Transmit(&huart2, (uint8_t *) ptr, len, HAL_MAX_DELAY);
    return len;
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-//    printf("1 milli!\r\n");
-}
 
 //copied from daq-testbed-basic
 uint8_t opcodes_to_spi(uint16_t* opcodes, uint8_t num_opcodes, uint8_t* spi_bytes) {
@@ -126,19 +132,24 @@ float adc_to_psi(int32_t adc_count){
 }
 
 
-void actuate(int32_t channel, int32_t on){ //labeled channels 1-16
-	if(channel < 8){
-		pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, channel-1, on);
+void actuate(int32_t channel, int32_t off){ //labeled channels 1-16
+	if(channel <= 8){
+		pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, channel-1, !off);
 	}else{
-		pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, channel-9, on);
+		pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, channel-9, !off);
 	}
 }
 
-
-float serial_data[] = {0,0,0,0}; //send to raspberry pi
-
-uint8_t actuation_channels[11] = {0};
-
+void abort_valves(){
+	for(uint8_t i=1; i<=8; i++){
+		actuate(i, 0);
+		act_channels[i] = 0;
+	}
+	actuate(9, 1);
+	act_channels[9] = 1;
+	actuate(10, 1);
+	act_channels[10] = 1;
+}
 
 
 
@@ -189,11 +200,17 @@ int main(void)
 
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, 1);
 
-
+  //set all channels off
    for (uint32_t i = 1; i <= 16; i++){
 	   actuate(i, 0);
    }
 
+//  for(uint8_t i = 0; i < 8; i++){
+//	  pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, i, 0);
+//  }
+//  for(uint8_t i = 0; i < 8; i++){
+//  	  pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, i, 0);
+//    }
 
   //DAQ TESBED init
   HAL_Delay(50);
@@ -211,7 +228,12 @@ int main(void)
   //set channel 2 gain to 16
   //0000 0100 0000 0000
 
-  uint32_t ctr = 0;
+  //start reciving commands
+  HAL_UART_Receive_IT(&huart2, UART2_rxBuffer, 1);
+
+
+printf("-------------------------------------------------------------------- \r\n");
+printf("  ms         psi1        psi2       TC1 mV    | 1 2 3 4 5 6 7 8 9 10 \r\n");
 
 
   /* USER CODE END 2 */
@@ -221,114 +243,73 @@ int main(void)
   while (1)
   {
 
-//    for (uint32_t i = 0; i < 8; i++) {
-//      int j = i - 1;
-//      if (j < 0) j = 7;
-//      pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, j, 1);
-//      pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, i, 0);
-//      pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, j, 1);
-//      pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, i, 0);
-//      HAL_Delay(500);
-//      printf("actuated channel %d \r\n", i);
-//      // pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, i, 0);
-//    }
-//    pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, 7, 1);
-//    pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, 7, 1);
-
-	  for (uint8_t i=0; i<10){
-
-	  }
-
-
 
 
 
     uint8_t drdy = !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5); // read DRDY
-
 	if (drdy) {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, 0);
 
+		//request
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, 0);
 		uint8_t tx_data[32] = {0};
 		uint8_t rx_data[32];
-
 		HAL_SPI_TransmitReceive(&hspi1, tx_data, rx_data, 27, HAL_MAX_DELAY);
-
-
-
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, 1);
 
-		serial_data[0] = ctr;
-
-
-//        printf("test!\r\n");
-//        printf("{%ld} status %x %x %x %x %x %x %x %x %x\r\n", ctr, rx_data[0], rx_data[1], rx_data[2], rx_data[3], rx_data[4], rx_data[5], rx_data[6], rx_data[7], rx_data[8]);
 
 		int32_t channels[8];
 		for (uint8_t i = 0; i < 8; i++) {
 		  channels[i] = (rx_data[i * 3 + 3] << 24) | (rx_data[i * 3 + 4] << 16) | (rx_data[i * 3 + 5] << 8);
 		  channels[i] >>= 8;
 
-		  if (i == 0) {
-			float psi = adc_to_psi(channels[i]);
-//			if(psi > -10){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
-//				printf("PSI 0: %f \r\n", psi);
-				serial_data[1] = psi;
-//			}
-		  }
-		  if (i == 1) {
-			float psi = adc_to_psi(channels[i]);
-//			if(psi > -10){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
-//				printf("PSI 1: %f \r\n", psi);
-				serial_data[2] = psi;
-//			}
-		  }
+		  data_out[0] = adc_to_psi(channels[0]);
+		  data_out[1] = adc_to_psi(channels[1]);
+		  data_out[2] = adc_to_volt(channels[2], 16) * 1000.0 - 0.5;
 
-          if (i == 2) {
-        	float mV = adc_to_volt(channels[2],16) * 1000.0 - 0.5;
-
-//        	if(fabs(mV) < 1000){ //hacky fix if pressure transducer is not connected or broken or transmitting intermittently
-//				printf("TC 1: %f \r\n", mV);
-				serial_data[3] = mV;
-//			}
-          }
 		}
+	}
 
-//        printf("0: %ld\r\n", channels[0]);
-//        printf("1: %ld\r\n", channels[1]);
-//        printf("\r\n");
+	if(keypress){
+		char key = UART2_rxBuffer[0];
+			 if(key == '1') {act_channels[1] = 1; actuate(1, 1);}
+		else if(key == '2') {act_channels[2] = 1; actuate(2, 1);}
+		else if(key == '3') {act_channels[3] = 1; actuate(3, 1);}
+		else if(key == '4') {act_channels[4] = 1; actuate(4, 1);}
+		else if(key == '5') {act_channels[5] = 1; actuate(5, 1);}
+		else if(key == '6') {act_channels[6] = 1; actuate(6, 1);}
+		else if(key == '7') {act_channels[7] = 1; actuate(7, 1);}
+		else if(key == '8') {act_channels[8] = 1; actuate(8, 1);}
+		else if(key == '9') {act_channels[9] = 1; actuate(9, 1);}
+		else if(key == '0') {act_channels[10] = 1; actuate(10, 1);}
 
-	  }else{
-//		  printf("DRDY not ready \r\n");
-	  }
+		else if(key == 'q') {act_channels[1] = 0; actuate(1, 0);}
+		else if(key == 'w') {act_channels[2] = 0; actuate(2, 0);}
+		else if(key == 'e') {act_channels[3] = 0; actuate(3, 0);}
+		else if(key == 'r') {act_channels[4] = 0; actuate(4, 0);}
+		else if(key == 't') {act_channels[5] = 0; actuate(5, 0);}
+		else if(key == 'y') {act_channels[6] = 0; actuate(6, 0);}
+		else if(key == 'u') {act_channels[7] = 0; actuate(7, 0);}
+		else if(key == 'i') {act_channels[8] = 0; actuate(8, 0);}
+		else if(key == 'o') {act_channels[9] = 0; actuate(9, 0);}
+		else if(key == 'p') {act_channels[10] = 0; actuate(10, 0);}
+		else if(key == 127) {abort_valves();}
+
+		keypress = 0;
+	}
 
 
-	for(int i = 0; i < 4; i++){
-		printf("%f, ", serial_data[i]);
+	printf("%ld,   ", millis);
+	for(uint8_t i = 0; i < 3; i++){
+		printf("%f, ", data_out[i]);
+	}
+	printf("  ");
+	for(uint8_t i = 1; i <= 10; i++){
+		printf("%d ", act_channels[i]);
 	}
 	printf("\r\n");
 
-	HAL_Delay(1);
-	ctr++;
+//	HAL_Delay(1);
 
-
-
-    // for (uint32_t i = 0; i < 8; i++) {
-    //   int j = i - 1;
-    //   if (j < 0) j = 7;
-    //   pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, j, 1);
-    //   pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, i, 0);
-    //   HAL_Delay(500);
-    //   // pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, i, 0);
-    // }
-    // pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_2, 7, 1);
-
-    // HAL_I2C_Mem_Write(hi2c, addr, BMP581_REG_OSR_CONFIG, 1, &osr_config, 1, 10);
-
-    // HAL_I2C_Mem_Read(&hi2c1, addr, BMP581_REG_PRES_DATA_LSB, 1, &pres_lsb, 1, 10);
-
-    // uint8_t test = pca9534_read_reg(&hi2c1, PCA9534_OUTPUT_1, PCA9534_REG_CONFIG);
-
-    // HAL_Delay(1000);
 
     /* USER CODE END WHILE */
 
@@ -391,6 +372,21 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+//    printf("1 milli!\r\n");
+    millis++;
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+//	printf("recv: %c \r\n", UART2_rxBuffer[0]);
+	keypress = 1;
+    HAL_UART_Receive_IT(&huart2, UART2_rxBuffer, 1);
+}
+
 
 /* USER CODE END 4 */
 
