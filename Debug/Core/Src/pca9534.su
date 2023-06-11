@@ -1,5 +1,5 @@
 ../Core/Src/pca9534.c:3:9:pca9534_read_reg	40	static
-../Core/Src/pca9534.c:12:6:pca9534_write_reg	32	static
-../Core/Src/pca9534.c:18:6:pca9534_init_output	16	static
-../Core/Src/pca9534.c:23:6:pca9534_init_input	16	static
-../Core/Src/pca9534.c:28:6:pca9534_set_channel	24	static
+../Core/Src/pca9534.c:12:6:pca9534_write_reg	40	static
+../Core/Src/pca9534.c:18:6:pca9534_init_output	32	static
+../Core/Src/pca9534.c:23:6:pca9534_init_input	32	static
+../Core/Src/pca9534.c:28:6:pca9534_set_channel	56	static

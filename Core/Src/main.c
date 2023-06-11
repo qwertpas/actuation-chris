@@ -69,7 +69,7 @@ uint32_t millis = 0;
 float data_out[3] = {0}; //send to raspberry pi: (psi1, psi2, temp1)
 uint8_t act_channels[11] = {0}; //first element is unused so 1-10 correspond to labeled channels
 
-
+uint8_t ok_to_go;
 
 int _write(int fd, char* ptr, int len) {
   HAL_UART_Transmit(&huart2, (uint8_t *) ptr, len, HAL_MAX_DELAY);
@@ -198,12 +198,15 @@ int main(void)
   pca9534_init_output(&hi2c1, PCA9534_OUTPUT_1);
   pca9534_init_output(&hi2c1, PCA9534_OUTPUT_2);
 
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, 1);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, 0);
 
   //set all channels off
    for (uint32_t i = 1; i <= 16; i++){
 	   actuate(i, 0);
    }
+
+   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, 1);
+
 
 //  for(uint8_t i = 0; i < 8; i++){
 //	  pca9534_set_channel(&hi2c1, PCA9534_OUTPUT_1, i, 0);
@@ -235,6 +238,7 @@ int main(void)
 printf("-------------------------------------------------------------------- \r\n");
 printf("  ms         psi1        psi2       TC1 mV    | 1 2 3 4 5 6 7 8 9 10 \r\n");
 
+	ok_to_go = 1;
 
   /* USER CODE END 2 */
 
@@ -387,6 +391,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     HAL_UART_Receive_IT(&huart2, UART2_rxBuffer, 1);
 }
 
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+	HAL_UART_Receive_IT(&huart2, UART2_rxBuffer, 1);
+}
 
 /* USER CODE END 4 */
 
